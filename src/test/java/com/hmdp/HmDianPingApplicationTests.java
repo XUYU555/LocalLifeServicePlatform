@@ -1,12 +1,14 @@
 package com.hmdp;
 
 import com.hmdp.entity.Shop;
+import com.hmdp.entity.VoucherOrder;
 import com.hmdp.service.impl.ShopServiceImpl;
 import com.hmdp.utils.RedisIdWorker;
 import org.junit.jupiter.api.Test;
 import org.redisson.Redisson;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.boot.test.context.SpringBootTest;
 import org.springframework.data.geo.Point;
 import org.springframework.data.redis.connection.RedisGeoCommands;
@@ -33,6 +35,9 @@ class HmDianPingApplicationTests {
 
     @Resource
     StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    RabbitTemplate rabbitTemplate;
 
     private ExecutorService ex = Executors.newFixedThreadPool(500);
 
@@ -96,6 +101,15 @@ class HmDianPingApplicationTests {
             }
             stringRedisTemplate.opsForGeo().add(key, locations);
         }
+    }
+
+    @Test
+    public void testMQ() {
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setVoucherId(1L);
+        voucherOrder.setUserId(1L);
+        voucherOrder.setId(1L);
+        rabbitTemplate.convertAndSend("seckill.direct", "order", voucherOrder);
     }
 
 }

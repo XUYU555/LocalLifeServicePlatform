@@ -21,6 +21,6 @@ redis.call('incrby', stockKey, -1)
 redis.call('sadd', orderKey, userId)
 -- 将userid、voucherid、orderid，放入到消息队列中
 -- XADD key [NOMKSTREAM] [MAXLEN|MINID [=|~] threshold [LIMIT count]] *|ID field value [field value ...]
-redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', orderId)
+--redis.call('xadd', 'stream.orders', '*', 'userId', userId, 'voucherId', voucherId, 'id', orderId)
 return 0
 

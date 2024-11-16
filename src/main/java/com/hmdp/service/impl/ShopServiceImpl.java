@@ -113,6 +113,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     private Shop queryByHCJC(Long id) {
         String shopJson = stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id);
         if (StrUtil.isNotBlank(shopJson)) {
+            // 缓存命中直接返回
             Shop shop = JSONUtil.toBean(shopJson, Shop.class);
             return shop;
         }
@@ -135,6 +136,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
                 return JSONUtil.toBean(stringRedisTemplate.opsForValue().get(CACHE_SHOP_KEY + id), Shop.class);
             }
             shop = getById(id);
+            // 存入空数据，解决缓存穿透问题
             if (shop == null) {
                 stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "", 2L, TimeUnit.MINUTES);
                 return null;
@@ -170,7 +172,8 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
     }
 
     private boolean tryLock(String lockKey) {
-        Boolean lock = stringRedisTemplate.opsForValue().setIfAbsent(lockKey, "lock");
+        // 在获取互斥锁时，给互斥锁添加一个过期时间，防止服务突然宕2q12q3w1无法释放锁
+        Boolean lock = stringRedisTemplate.opsForValue().setIfAbsent(lockKey, "lock", 2L, TimeUnit.MINUTES);
         return BooleanUtil.isTrue(lock);
     }
 

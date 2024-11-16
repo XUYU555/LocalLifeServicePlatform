@@ -19,6 +19,18 @@ spring:
         time-between-eviction-runs: 10s
   jackson:
     default-property-inclusion: non_null # JSON处理时忽略非空字段
+  rabbitmq:
+    virtual-host: /dp
+    username: dianping
+    password: 123456
+    host: 192.168.129.135
+    port: 5672
+    listener:
+      simple:
+        acknowledge-mode: auto # 开启消费者确认机制 自动ACK
+        retry:
+          enabled: true # 开启消费者失败重试，参数为默认参数
+          stateless: true
 mybatis-plus:
   type-aliases-package: com.hmdp.entity # 别名扫描包
 logging:

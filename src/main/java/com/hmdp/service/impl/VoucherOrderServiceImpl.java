@@ -1,8 +1,8 @@
 package com.hmdp.service.impl;
 
-import cn.hutool.core.bean.BeanUtil;
 import com.hmdp.dto.Result;
 
+import com.hmdp.entity.SeckillVoucher;
 import com.hmdp.entity.VoucherOrder;
 import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
@@ -13,30 +13,24 @@ import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
 import org.redisson.api.RLock;
 import org.redisson.api.RedissonClient;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.aop.framework.AopContext;
-import org.springframework.context.annotation.Bean;
 import org.springframework.core.io.ClassPathResource;
-import org.springframework.data.redis.connection.stream.*;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.data.redis.core.script.DefaultRedisScript;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
-import javax.annotation.PostConstruct;
 import javax.annotation.Resource;
-import java.time.Duration;
 import java.util.Collections;
-import java.util.List;
-import java.util.Map;
-import java.util.concurrent.*;
 
 /**
  * <p>
  *  服务实现类
  * </p>
  *
- * @author 虎哥
- * @since 2021-12-22
+ * @author xy
+ * @since 2024-3-25
  */
 @Slf4j
 @Service
@@ -46,7 +40,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     RedisIdWorker redisIdWorker;
 
     @Resource
-    ISeckillVoucherService service;
+    ISeckillVoucherService seckillVoucherService;
 
     @Resource
     RedissonClient redissonClient;
@@ -54,17 +48,27 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Resource
     StringRedisTemplate stringRedisTemplate;
 
+    @Resource
+    RabbitTemplate rabbitTemplate;
+
+    private static final String SECKILL_DIRECT_EXCHANGE = "seckill.direct";
+    private static final String SECKILL_LUA_SCRIPT = "seckill.lua";
+
+
     private final static DefaultRedisScript<Long> REDIS_SCRIPT;
     static {
         REDIS_SCRIPT = new DefaultRedisScript<>();
         REDIS_SCRIPT.setResultType(Long.class);
-        REDIS_SCRIPT.setLocation(new ClassPathResource("seckill.lua"));
+        REDIS_SCRIPT.setLocation(new ClassPathResource(SECKILL_LUA_SCRIPT));
     }
-    // 获取单个线程
-    private final static ExecutorService VOUCHER_ORDER_EXECUTORS = Executors.newSingleThreadExecutor();
+
     private IVoucherOrderService proxy;
+
     // 添加注释，在类被初始化是就执行
-    @PostConstruct
+    // 基于stream的消息队列
+    // 获取单个线程
+    // private final static ExecutorService VOUCHER_ORDER_EXECUTORS = Executors.newSingleThreadExecutor();
+    /*@PostConstruct
     private void init() {
         VOUCHER_ORDER_EXECUTORS.submit(new VoucherHandler());
     }
@@ -127,15 +131,16 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
                 }
             }
         }
-    }
+    }*/
 
-    private void handlerVoucherOrder(VoucherOrder voucherOrder) {
+    public void handlerVoucherOrder(VoucherOrder voucherOrder) {
         RLock lock = redissonClient.getLock("lock:order:" + voucherOrder.getUserId());
         boolean tryLock = lock.tryLock();
         if (!tryLock) {
             log.error("获取锁失败");
         }
         try {
+            // 创建优惠卷订单
             proxy.createVoucherOrder(voucherOrder);
         } finally {
             lock.unlock();
@@ -155,7 +160,14 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         if (execute.intValue() != 0) {
             return Result.fail("库存不足或已达购买上限");
         }
+        // 通过AopContext获取代理对象
         proxy = (IVoucherOrderService) AopContext.currentProxy();
+        VoucherOrder voucherOrder = new VoucherOrder();
+        voucherOrder.setVoucherId(voucherId);
+        voucherOrder.setId(orderId);
+        voucherOrder.setUserId(UserHolder.getUser().getId());
+        // 发送消息到rabbitmq中,等待异步消费
+        rabbitTemplate.convertAndSend(SECKILL_DIRECT_EXCHANGE, "order", voucherOrder);
         return Result.ok(orderId);
     }
 
@@ -164,16 +176,17 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Transactional
     public void createVoucherOrder(VoucherOrder voucherOrder) {
         // 一人一单
-        int count = query().eq("voucher_id", voucherOrder.getVoucherId())
-                .eq("user_id", voucherOrder.getUserId()).count();
+        // int count = query().eq("voucher_id", voucherOrder.getVoucherId()).eq("user_id", voucherOrder.getUserId()).count();
+        int count = lambdaQuery().eq(VoucherOrder::getVoucherId, voucherOrder.getVoucherId())
+                .eq(VoucherOrder::getUserId, voucherOrder.getUserId()).count();
         if(count > 0) {
             log.error("用户已达购买上限");
         }
-        boolean success = service.update()
-                .setSql("stock = stock -1")
-                // 优化后的乐观锁（原本乐观锁成功率低）
-                .eq("voucher_id", voucherOrder.getVoucherId())
-                .gt("stock", 0)
+        // 优化后的乐观锁（原本乐观锁成功率低）
+        boolean success = seckillVoucherService.lambdaUpdate()
+                .eq(SeckillVoucher::getVoucherId, voucherOrder.getVoucherId())
+                .gt(SeckillVoucher::getStock, 0)
+                .setSql("stock = stock - 1")
                 .update();
         if(!success) {
             log.error("库存不足");
