@@ -12,13 +12,9 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 
 /**
- * <p>
- * 前端控制器
- * </p>
- *
  * @author xy
- * @date 2024-04-23 21:45
  */
+
 @RestController
 @RequestMapping("/shop")
 public class ShopController {

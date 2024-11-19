@@ -15,13 +15,9 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 import java.util.List;
 
+
 /**
- * <p>
- * 前端控制器
- * </p>
- *
  * @author xy
- * @since 2024-4-25 20:45
  */
 @RestController
 @RequestMapping("/blog")

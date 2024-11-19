@@ -10,13 +10,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 import javax.annotation.Resource;
 
+
 /**
- * <p>
- *  前端控制器
- * </p>
- *
  * @author xy
- * @since 2024-4-25 20:45
  */
 @RestController
 @RequestMapping("/voucher-order")

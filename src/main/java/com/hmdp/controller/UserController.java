@@ -16,13 +16,9 @@ import org.springframework.web.bind.annotation.*;
 import javax.annotation.Resource;
 import javax.servlet.http.HttpSession;
 
+
 /**
- * <p>
- * 前端控制器
- * </p>
- *
  * @author xy
- * @since 2024-4-25 20:45
  */
 @Slf4j
 @RestController

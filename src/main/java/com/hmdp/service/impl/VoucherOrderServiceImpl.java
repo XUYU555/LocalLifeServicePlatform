@@ -8,6 +8,7 @@ import com.hmdp.mapper.VoucherOrderMapper;
 import com.hmdp.service.ISeckillVoucherService;
 import com.hmdp.service.IVoucherOrderService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.RabbitMQConstants;
 import com.hmdp.utils.RedisIdWorker;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -167,7 +168,7 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
         voucherOrder.setId(orderId);
         voucherOrder.setUserId(UserHolder.getUser().getId());
         // 发送消息到rabbitmq中,等待异步消费
-        rabbitTemplate.convertAndSend(SECKILL_DIRECT_EXCHANGE, "order", voucherOrder);
+        rabbitTemplate.convertAndSend(RabbitMQConstants.SECKILL_DIRECT_EXCHANGE, RabbitMQConstants.SECKILL_KEY, voucherOrder);
         return Result.ok(orderId);
     }
 
@@ -176,7 +177,6 @@ public class VoucherOrderServiceImpl extends ServiceImpl<VoucherOrderMapper, Vou
     @Transactional
     public void createVoucherOrder(VoucherOrder voucherOrder) {
         // 一人一单
-        // int count = query().eq("voucher_id", voucherOrder.getVoucherId()).eq("user_id", voucherOrder.getUserId()).count();
         int count = lambdaQuery().eq(VoucherOrder::getVoucherId, voucherOrder.getVoucherId())
                 .eq(VoucherOrder::getUserId, voucherOrder.getUserId()).count();
         if(count > 0) {

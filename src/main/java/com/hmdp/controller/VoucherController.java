@@ -10,7 +10,6 @@ import javax.annotation.Resource;
 
 /**
  * @author xy
- * @date 2024-04-19 21:45
  */
 @RestController
 @RequestMapping("/voucher")

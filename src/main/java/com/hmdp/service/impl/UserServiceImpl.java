@@ -11,6 +11,7 @@ import com.hmdp.dto.UserDTO;
 import com.hmdp.entity.User;
 import com.hmdp.mapper.UserMapper;
 import com.hmdp.service.IUserService;
+import com.hmdp.utils.RedisConstants;
 import com.hmdp.utils.RegexUtils;
 import com.hmdp.utils.UserHolder;
 import lombok.extern.slf4j.Slf4j;
@@ -58,7 +59,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         // session.setAttribute("code", code);
         // 保存到redis
         stringRedisTemplate.opsForValue().set(LOGIN_CODE_KEY + phone, code, LOGIN_CODE_TTL, TimeUnit.MINUTES);
-        // 发送短信验证码
+        // Todo 发送短信验证码
         log.debug("短信验证码为：{}", code);
         return Result.ok();
     }
@@ -85,7 +86,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         }
         // 保存用户到session
         // session.setAttribute("user", BeanUtil.copyProperties(user, UserDTO.class));s
-        // TODO 保存用户到redis
+        // 保存用户到redis
         UserDTO userDTO = BeanUtil.copyProperties(user, UserDTO.class);
         Map<String, Object> loginUser = BeanUtil.beanToMap(userDTO, new HashMap<>(), CopyOptions.create()
                 .setFieldValueEditor((fieldName, fieldValue) -> fieldValue.toString()));
@@ -102,7 +103,7 @@ public class UserServiceImpl extends ServiceImpl<UserMapper, User> implements IU
         // 获取当前时间
         LocalDateTime now = LocalDateTime.now();
         String format = now.format(DateTimeFormatter.ofPattern(":yyyyMM"));
-        String key = "sign:" + userId.toString() + format;
+        String key = USER_SIGN_KEY + userId.toString() + format;
         // 获取日期，存入Redis中
         int dayOfMonth = now.getDayOfMonth();
         stringRedisTemplate.opsForValue().setBit(key, dayOfMonth-1, true);

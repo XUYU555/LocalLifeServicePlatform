@@ -11,13 +11,9 @@ import org.springframework.web.bind.annotation.RestController;
 import javax.annotation.Resource;
 import java.util.List;
 
+
 /**
- * <p>
- * 前端控制器
- * </p>
- *
  * @author xy
- * @date 2024-04-23 21:45
  */
 @RestController
 @RequestMapping("/shop-type")

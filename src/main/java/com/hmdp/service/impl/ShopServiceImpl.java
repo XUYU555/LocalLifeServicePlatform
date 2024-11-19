@@ -10,8 +10,12 @@ import com.hmdp.entity.Shop;
 import com.hmdp.mapper.ShopMapper;
 import com.hmdp.service.IShopService;
 import com.baomidou.mybatisplus.extension.service.impl.ServiceImpl;
+import com.hmdp.utils.RabbitMQConstants;
 import com.hmdp.utils.RedisData;
 import com.hmdp.utils.SystemConstants;
+import org.redisson.api.RLock;
+import org.redisson.api.RedissonClient;
+import org.springframework.amqp.rabbit.core.RabbitTemplate;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.data.geo.Distance;
 import org.springframework.data.geo.GeoResult;
@@ -33,8 +37,7 @@ import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.stream.Collectors;
 
-import static com.hmdp.utils.RedisConstants.CACHE_SHOP_KEY;
-import static com.hmdp.utils.RedisConstants.CACHE_SHOP_TTL;
+import static com.hmdp.utils.RedisConstants.*;
 
 /**
  * <p>
@@ -47,8 +50,14 @@ import static com.hmdp.utils.RedisConstants.CACHE_SHOP_TTL;
 @Service
 public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IShopService {
 
-    @Autowired
+    @Resource
     StringRedisTemplate stringRedisTemplate;
+
+    @Resource
+    RedissonClient redissonClient;
+
+    @Resource
+    RabbitTemplate rabbitTemplate;
 
     // 线程池
     private static final ExecutorService CACHE_REBUILD_EXECUTOR = Executors.newFixedThreadPool(10);
@@ -77,11 +86,11 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         RedisData re = JSONUtil.toBean(shopJson, RedisData.class);
         JSONObject jsonObject = (JSONObject) re.getData();
         Shop shop = JSONUtil.toBean(jsonObject, Shop.class);
-        String lockKey = "lock:shop:" + id;
+        RLock lock = redissonClient.getLock(LOCK_SHOP_KEY + id);
         // 命中， 判断是否过期
         if (!re.getExpireTime().isAfter(LocalDateTime.now())) {
             // 过期
-            boolean isLock = tryLock(lockKey);
+            boolean isLock = lock.tryLock();
             if (isLock) {
                 // 获取锁成功
                 CACHE_REBUILD_EXECUTOR.submit(() -> {
@@ -91,7 +100,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
                     } catch (Exception e) {
                         throw new RuntimeException(e);
                     } finally {
-                        unLock(lockKey);
+                        lock.unlock();
                     }
                 });
             } // 失败
@@ -121,11 +130,12 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         if (shopJson != null) {
             return null;
         }
-        String lockKey = "lock:shop:" + id;
+        RLock rLock = redissonClient.getLock(LOCK_SHOP_KEY + id);
         Shop shop = null;
+        // 获取锁来重构缓存
         try {
             // 获取互斥锁
-            boolean lock = tryLock(lockKey);
+            boolean lock = rLock.tryLock();
             if (!lock) {
                 // 获取失败，休眠在重试
                 Thread.sleep(50);
@@ -138,7 +148,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             shop = getById(id);
             // 存入空数据，解决缓存穿透问题
             if (shop == null) {
-                stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "", 2L, TimeUnit.MINUTES);
+                stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
                 return null;
             }
             stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
@@ -146,7 +156,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             throw new RuntimeException(e);
         } finally {
             // 不管成功与否，都要释放锁
-            unLock(lockKey);
+            rLock.unlock();
         }
         return shop;
     }
@@ -164,22 +174,22 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         Shop shop = getById(id);
         if (shop == null) {
             // 设置一个空值
-            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "", 2L, TimeUnit.MINUTES);
+            stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, "", CACHE_NULL_TTL, TimeUnit.MINUTES);
             return null;
         }
         stringRedisTemplate.opsForValue().set(CACHE_SHOP_KEY + id, JSONUtil.toJsonStr(shop), CACHE_SHOP_TTL, TimeUnit.MINUTES);
         return shop;
     }
 
-    private boolean tryLock(String lockKey) {
-        // 在获取互斥锁时，给互斥锁添加一个过期时间，防止服务突然宕2q12q3w1无法释放锁
+    /*private boolean tryLock(String lockKey) {
+        // 在获取互斥锁时，给互斥锁添加一个过期时间，防止服务突然宕无法释放锁
         Boolean lock = stringRedisTemplate.opsForValue().setIfAbsent(lockKey, "lock", 2L, TimeUnit.MINUTES);
         return BooleanUtil.isTrue(lock);
     }
 
     private void unLock(String lockKey) {
         stringRedisTemplate.delete(lockKey);
-    }
+    }*/
 
     @Override
     @Transactional
@@ -188,7 +198,9 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
             return Result.fail("商户不存在");
         }
         updateById(shop);
-        stringRedisTemplate.delete(CACHE_SHOP_KEY + shop.getId());
+        // stringRedisTemplate.delete(CACHE_SHOP_KEY + shop.getId());
+        // 发送消息到RabbitMQ，异步保证双写一致性
+        rabbitTemplate.convertAndSend(RabbitMQConstants.SHOP_DIRECT, RabbitMQConstants.SHOP_CACHE_KEY, shop);
         return Result.ok();
     }
 
@@ -206,7 +218,7 @@ public class ShopServiceImpl extends ServiceImpl<ShopMapper, Shop> implements IS
         // 分页参数
         int form = (current - 1) * SystemConstants.DEFAULT_PAGE_SIZE;
         int end = current * SystemConstants.DEFAULT_PAGE_SIZE;
-        String key = "geo:shop:" + typeId.toString();
+        String key = SHOP_GEO_KEY + typeId.toString();
         // geosearch命令没有分页查询，只能逻辑分页查询到end，再在结果中跳过form
         GeoResults<RedisGeoCommands.GeoLocation<String>> results = stringRedisTemplate.opsForGeo().search(key,
                 GeoReference.fromCoordinate(x, y),
