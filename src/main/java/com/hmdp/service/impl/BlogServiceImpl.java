@@ -1,7 +1,6 @@
 package com.hmdp.service.impl;
 
 import cn.hutool.core.bean.BeanUtil;
-import cn.hutool.core.util.BooleanUtil;
 import cn.hutool.core.util.StrUtil;
 import com.baomidou.mybatisplus.extension.plugins.pagination.Page;
 import com.hmdp.dto.Result;
@@ -22,12 +21,14 @@ import org.springframework.data.redis.core.ZSetOperations;
 import org.springframework.stereotype.Service;
 
 import javax.annotation.Resource;
-import javax.xml.ws.Holder;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.List;
 import java.util.Set;
 import java.util.stream.Collectors;
+
+import static com.hmdp.utils.RedisConstants.BLOG_LIKED_KEY;
+import static com.hmdp.utils.RedisConstants.FEED_KEY;
 
 /**
  * <p>
@@ -63,7 +64,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             return;
         }
         Long userid = UserHolder.getUser().getId();
-        String key = "blog:liked:" + blog.getId();
+        String key = BLOG_LIKED_KEY + blog.getId();
         Double score = stringRedisTemplate.opsForZSet().score(key, userid.toString());
         blog.setIsLike(score != null);
     }
@@ -99,7 +100,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Override
     public Result likeBlog(Long id) {
         Long userid = UserHolder.getUser().getId();
-        String key = "blog:liked:" + id;
+        String key = BLOG_LIKED_KEY + id;
         Double score = stringRedisTemplate.opsForZSet().score(key, userid.toString());
         if (score != null) {
             // 已点赞过，liked-1
@@ -119,7 +120,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
 
     @Override
     public Result queryLikes(Long id) {
-        String key = "blog:liked:" + id;
+        String key = BLOG_LIKED_KEY + id;
         // 从SortSet中查询top5
         Set<String> range = stringRedisTemplate.opsForZSet().range(key, 0, 4);
         if (range == null || range.isEmpty()) {
@@ -127,10 +128,10 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             return Result.ok(Collections.emptyList());
         }
         List<Long> ids = range.stream().map(Long::valueOf).collect(Collectors.toList());
-        List<UserDTO> userDTOS = userService.listByIds(ids).stream()
+        List<UserDTO> userDTOs = userService.listByIds(ids).stream()
                 .map(user -> BeanUtil.copyProperties(user, UserDTO.class))
                 .collect(Collectors.toList());
-        return Result.ok(userDTOS);
+        return Result.ok(userDTOs);
     }
 
     @Override
@@ -145,7 +146,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
             // 获取粉丝用户
             List<Follow> follows = followService.query().eq("follow_user_id", user.getId()).list();
             for (Follow follow : follows) {
-                String key = "feed:" + follow.getUserId();
+                String key = FEED_KEY+ follow.getUserId();
                 stringRedisTemplate.opsForZSet().add(key, blog.getId().toString(), System.currentTimeMillis());
             }
         }
@@ -156,7 +157,7 @@ public class BlogServiceImpl extends ServiceImpl<BlogMapper, Blog> implements IB
     @Override
     public Result queryByBlogOfFollow(Long lastMin, Integer offset) {
         Long id = UserHolder.getUser().getId();
-        String key = "feed:" + id.toString();
+        String key = FEED_KEY + id.toString();
         // ZREVRANGEBYSCORE key max min [WITHSCORES] [LIMIT offset count]
         Set<ZSetOperations.TypedTuple<String>> typedTuples = stringRedisTemplate.opsForZSet()
                 .reverseRangeByScoreWithScores(key, 0, lastMin, offset, 2);

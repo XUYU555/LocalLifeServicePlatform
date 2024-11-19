@@ -47,11 +47,11 @@ public class SampleRedisLock implements ILock {
 
     @Override
     public void unLock() {
-        // 使用Lua脚本，使查询与删除具有原子性
+        // 使用Lua脚本，使查询与删除具有原子性，处理了误删问题
         stringRedisTemplate.execute(UNLOCK_SCRIPT,
                 Collections.singletonList(PREFIX + name),
                 ID_PREFIX + Thread.currentThread().getId());
-        // 在释放锁时判断
+        // 在释放锁时判断，防止超时释放锁导致误删
         /*String cur = ID_PREFIX + Thread.currentThread().getId();
         String threadId = stringRedisTemplate.opsForValue().get(PREFIX + name);
         if(cur.equals(threadId)) {
